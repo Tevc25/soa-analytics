@@ -95,7 +95,10 @@ class MonthlyService:
         }
         res = self.col.insert_one(doc)
         return {"message": "Monthly analytics generated", "monthly_id": str(res.inserted_id)}
-
+    
+    def generate_another(self, user_id: str, month: str):
+        requests.get("http://localhost:8080/")
+        
     def get(self, user_id: str, month: str):
         if not MONTH_RE.match(month):
             raise ValueError("month must be in YYYY-MM format")
