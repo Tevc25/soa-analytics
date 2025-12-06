@@ -29,24 +29,37 @@ class MonthlyService:
         except Exception:
             return None
 
-    def generate(self, user_id: str, month: str):
+    def generate(self, user_id: str, month: str, jwt_token: str = None):
         if not MONTH_RE.match(month):
             raise ValueError("month must be in YYYY-MM format")
+
+        headers = {}
+        if jwt_token:
+            headers["Authorization"] = f"Bearer {jwt_token}"
 
         rb = requests.get(
             f"{CATEGORY_BUDGET_URL}/{user_id}/budgets",
             params={"month": month},
+            headers=headers,
             timeout=8
         )
         if rb.status_code != 200:
-            raise ValueError(f"Budget service error: {rb.status_code}")
+            try:
+                error_detail = rb.json().get("detail", rb.text)
+            except:
+                error_detail = rb.text or f"Status code: {rb.status_code}"
+            raise ValueError(f"Budget service error ({rb.status_code}): {error_detail}")
 
         budgets = rb.json()
         budget_by_cat = {str(b["category_id"]): float(b.get("limit", 0)) for b in budgets}
 
-        rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", timeout=8)
+        rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", headers=headers, timeout=8)
         if rc.status_code != 200:
-            raise ValueError(f"Category service error: {rc.status_code}")
+            try:
+                error_detail = rc.json().get("detail", rc.text)
+            except:
+                error_detail = rc.text or f"Status code: {rc.status_code}"
+            raise ValueError(f"Category service error ({rc.status_code}): {error_detail}")
 
         categories = rc.json()
 

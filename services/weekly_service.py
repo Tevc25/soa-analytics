@@ -16,7 +16,7 @@ class WeeklyService:
         except Exception:
             return None
 
-    def generate_last7days(self, user_id: str):
+    def generate_last7days(self, user_id: str, jwt_token: str = None):
         today = datetime.now()
         start = (today - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
         end = (today + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -27,9 +27,17 @@ class WeeklyService:
 
         spent_by_day = {k: 0.0 for k in keys}
 
-        rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", timeout=8)
+        headers = {}
+        if jwt_token:
+            headers["Authorization"] = f"Bearer {jwt_token}"
+
+        rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", headers=headers, timeout=8)
         if rc.status_code != 200:
-            raise ValueError(f"Category service error: {rc.status_code}")
+            try:
+                error_detail = rc.json().get("detail", rc.text)
+            except:
+                error_detail = rc.text or f"Status code: {rc.status_code}"
+            raise ValueError(f"Category service error ({rc.status_code}): {error_detail}")
 
         categories = rc.json()
 
