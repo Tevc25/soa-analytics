@@ -1,12 +1,15 @@
+import logging
 import os
 import requests
 from datetime import datetime, timedelta
 from db_two.database import get_db
+from logging_utils import get_correlation_id
 
 CATEGORY_BUDGET_URL = os.getenv("CATEGORY_BUDGET_URL", "http://localhost:8002").rstrip("/")
 
 class WeeklyService:
     def __init__(self):
+        self.logger = logging.getLogger("soa-analytics")
         self.db = get_db()
         self.col = self.db["weekly_data"]
 
@@ -28,15 +31,36 @@ class WeeklyService:
         spent_by_day = {k: 0.0 for k in keys}
 
         headers = {}
+        correlation_id = get_correlation_id()
+        if correlation_id:
+            headers["X-Correlation-Id"] = correlation_id
         if jwt_token:
             headers["Authorization"] = f"Bearer {jwt_token}"
 
+        self.logger.info(
+            "Requesting categories for weekly analytics",
+            extra={
+                "correlation_id": correlation_id,
+                "url": f"{CATEGORY_BUDGET_URL}/{user_id}/categories",
+                "method": "GET",
+            },
+        )
         rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", headers=headers, timeout=8)
         if rc.status_code != 200:
             try:
                 error_detail = rc.json().get("detail", rc.text)
             except:
                 error_detail = rc.text or f"Status code: {rc.status_code}"
+            self.logger.error(
+                "Category service error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "url": f"{CATEGORY_BUDGET_URL}/{user_id}/categories",
+                    "method": "GET",
+                    "status_code": rc.status_code,
+                    "detail": error_detail,
+                },
+            )
             raise ValueError(f"Category service error ({rc.status_code}): {error_detail}")
 
         categories = rc.json()
@@ -63,6 +87,14 @@ class WeeklyService:
                 {"_id": existing["_id"]},
                 {"$set": {"days": days, "updated_at": now}}
             )
+            self.logger.info(
+                "Weekly analytics updated",
+                extra={
+                    "correlation_id": correlation_id,
+                    "path": f"/{user_id}/analytics/weekly/last7/recompute",
+                    "detail": f"weekly_id={existing['_id']}",
+                },
+            )
             return {"message": "Weekly analytics updated", "weekly_id": str(existing["_id"])}
 
         doc = {
@@ -73,6 +105,14 @@ class WeeklyService:
             "updated_at": now
         }
         res = self.col.insert_one(doc)
+        self.logger.info(
+            "Weekly analytics generated",
+            extra={
+                "correlation_id": correlation_id,
+                "path": f"/{user_id}/analytics/weekly/last7/generate",
+                "detail": f"weekly_id={res.inserted_id}",
+            },
+        )
         return {"message": "Weekly analytics generated", "weekly_id": str(res.inserted_id)}
 
     def get_last7days(self, user_id: str):

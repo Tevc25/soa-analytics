@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from routers.router import router
+from logging_utils import init_request_logging
 import uvicorn
 import os
 
@@ -33,6 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+init_request_logging(app, "soa-analytics")
 app.include_router(router)
 
 @app.get("/openapi.json", include_in_schema=False)

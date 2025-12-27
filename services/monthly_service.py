@@ -1,8 +1,10 @@
+import logging
 import os
 import re
 import requests
 from datetime import datetime
 from db_two.database import get_db
+from logging_utils import get_correlation_id
 
 MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -10,6 +12,7 @@ CATEGORY_BUDGET_URL = os.getenv("CATEGORY_BUDGET_URL", "http://localhost:8002").
 
 class MonthlyService:
     def __init__(self):
+        self.logger = logging.getLogger("soa-analytics")
         self.db = get_db()
         self.col = self.db["monthly_data"]
 
@@ -34,9 +37,20 @@ class MonthlyService:
             raise ValueError("month must be in YYYY-MM format")
 
         headers = {}
+        correlation_id = get_correlation_id()
+        if correlation_id:
+            headers["X-Correlation-Id"] = correlation_id
         if jwt_token:
             headers["Authorization"] = f"Bearer {jwt_token}"
 
+        self.logger.info(
+            "Requesting budgets for monthly analytics",
+            extra={
+                "correlation_id": correlation_id,
+                "url": f"{CATEGORY_BUDGET_URL}/{user_id}/budgets",
+                "method": "GET",
+            },
+        )
         rb = requests.get(
             f"{CATEGORY_BUDGET_URL}/{user_id}/budgets",
             params={"month": month},
@@ -48,17 +62,45 @@ class MonthlyService:
                 error_detail = rb.json().get("detail", rb.text)
             except:
                 error_detail = rb.text or f"Status code: {rb.status_code}"
+            self.logger.error(
+                "Budget service error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "url": f"{CATEGORY_BUDGET_URL}/{user_id}/budgets",
+                    "method": "GET",
+                    "status_code": rb.status_code,
+                    "detail": error_detail,
+                },
+            )
             raise ValueError(f"Budget service error ({rb.status_code}): {error_detail}")
 
         budgets = rb.json()
         budget_by_cat = {str(b["category_id"]): float(b.get("limit", 0)) for b in budgets}
 
+        self.logger.info(
+            "Requesting categories for monthly analytics",
+            extra={
+                "correlation_id": correlation_id,
+                "url": f"{CATEGORY_BUDGET_URL}/{user_id}/categories",
+                "method": "GET",
+            },
+        )
         rc = requests.get(f"{CATEGORY_BUDGET_URL}/{user_id}/categories", headers=headers, timeout=8)
         if rc.status_code != 200:
             try:
                 error_detail = rc.json().get("detail", rc.text)
             except:
                 error_detail = rc.text or f"Status code: {rc.status_code}"
+            self.logger.error(
+                "Category service error",
+                extra={
+                    "correlation_id": correlation_id,
+                    "url": f"{CATEGORY_BUDGET_URL}/{user_id}/categories",
+                    "method": "GET",
+                    "status_code": rc.status_code,
+                    "detail": error_detail,
+                },
+            )
             raise ValueError(f"Category service error ({rc.status_code}): {error_detail}")
 
         categories = rc.json()
@@ -97,6 +139,14 @@ class MonthlyService:
                 {"_id": existing["_id"]},
                 {"$set": {"rows": rows, "updated_at": now}}
             )
+            self.logger.info(
+                "Monthly analytics updated",
+                extra={
+                    "correlation_id": correlation_id,
+                    "path": f"/{user_id}/analytics/monthly/{month}",
+                    "detail": f"monthly_id={existing['_id']}",
+                },
+            )
             return {"message": "Monthly analytics updated", "monthly_id": str(existing["_id"])}
 
         doc = {
@@ -107,6 +157,14 @@ class MonthlyService:
             "updated_at": now
         }
         res = self.col.insert_one(doc)
+        self.logger.info(
+            "Monthly analytics generated",
+            extra={
+                "correlation_id": correlation_id,
+                "path": f"/{user_id}/analytics/monthly/generate",
+                "detail": f"monthly_id={res.inserted_id}",
+            },
+        )
         return {"message": "Monthly analytics generated", "monthly_id": str(res.inserted_id)}
     
     def generate_another(self, user_id: str, month: str):
